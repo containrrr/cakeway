@@ -1,0 +1,133 @@
+#!/bin/bash
+
+set -e
+
+CW_HOST=
+CW_DATA=~/.cakeway
+CW_KEYS=$CW_DATA/keys
+CW_INITKEY=$CW_KEYS/init.key
+CW_PORTS=$CW_DATA/ports
+
+usage() {
+    echo $"Usage: $0 <new | connect | list | remove>"
+    exit 1
+}
+
+pre_cmd() {
+    echo -ne '\e[90m'
+}
+
+post_cmd() {
+    echo -e '\e[0m'
+}
+
+run_cmd() {
+    pre_cmd
+    $@
+    post_cmd
+}
+
+not_impl() {
+    echo "Not implemented yet!"
+    exit 1
+}
+
+keyfile() {
+    echo -n "$CW_KEYS/tun.$1.key"
+}
+
+portfile() {
+    echo -n "$CW_PORTS/$1"
+}
+
+get_resp() {
+    echo "$1" | grep -i $2 |  awk -F': ' '{ print $2 }'
+}
+
+case $1 in
+    n|new)
+        TUNNEL=$2
+        TUNNEL_KEY=$(keyfile $TUNNEL)
+
+        mkdir -p "$CW_KEYS"
+
+        if [[ -z "$TUNNEL" ]]; then
+            echo $"Usage: $0 new <NAME>"
+            exit 1
+        else
+            echo -e "Creating new cakeway tunnel \e[36m$TUNNEL\e[0m"
+            
+            echo "Generating key..."
+            pre_cmd
+            ssh-keygen -f $TUNNEL_KEY -b 2048 -t rsa-sha2-512 -C "cakewalker@$TUNNEL" -N ''
+            post_cmd
+
+            echo "Connecting to cakeway daemon..."
+            run_cmd ssh -T cakewalker@$CW_HOST -i $CW_INITKEY < $TUNNEL_KEY.pub
+
+            echo "Retrieving tunnel configuration..."
+            TUNRESP=$(ssh -T cakewalker@$CW_HOST -i $TUNNEL_KEY)
+
+            R_VERSION=$(get_resp "$TUNRESP" 'version')
+            R_PORT=$(get_resp "$TUNRESP" 'port')
+            R_TUNNEL=$(get_resp "$TUNRESP" 'tunnel')
+
+            echo -e "Version: \e[36m$R_VERSION\e[0m"
+            echo -e "Tunnel: \e[36m$R_TUNNEL\e[0m"
+            echo -e "Port: \e[36m$R_PORT\e[0m"
+
+            PORTFILE=$(portfile $TUNNEL)
+
+            mkdir -p $CW_PORTS
+            echo -n "$R_PORT" > $PORTFILE
+
+            echo ''
+            echo 'Done! Use "'$0 'connect' $TUNNEL '<LOCAL PORT>" to connect!'
+        fi
+        ;;
+    c|open|connect)
+        TUNNEL=$2
+        TUNNEL_KEY=$(keyfile $TUNNEL)
+        PORTFILE=$(portfile $TUNNEL)
+        L_PORT=$3
+
+        if [[ -z "$TUNNEL" ]] || [[ -z "$L_PORT" ]]; then
+            echo $"Usage: $0 connect <NAME> <PORT>"
+            exit 1
+        elif [[ ! -f "$TUNNEL_KEY" ]]; then
+            echo -e "Invalid tunnel \e[36m$TUNNEL\e[0m (key does not exist)"
+            echo 1
+        elif [[ ! -f "$PORTFILE" ]]; then
+            echo -e "Invalid tunnel \e[36m$TUNNEL\e[0m (port entry does not exist)"
+            echo 1
+        else
+            R_PORT=$(cat $PORTFILE)
+            echo -e "Connecting cakeway tunnel \e[36m$TUNNEL\e[0m to local port \e[35m$L_PORT\e[0m... \nUse Ctrl-C to exit"
+            run_cmd ssh cakewalker@$CW_HOST -i $TUNNEL_KEY -N -R $R_PORT:localhost:$L_PORT
+        fi
+        ;;
+    l|list)
+        echo "Available tunnels:"
+        for KF in $CW_KEYS/tun.*.pub; do
+            KEY=$(basename $KF .key.pub  | sed 's/tun.//g')
+            echo " - $KEY"
+        done
+        ;;
+    r|remove|delete)
+        TUNNEL=$2
+        TUNNEL_KEY=$(keyfile $TUNNEL)
+        
+        if [[ -z "$TUNNEL" ]]; then
+            echo $"Usage: $0 remove <NAME>"
+            exit 1
+        elif [[ ! -f "$TUNNEL_KEY" ]]; then
+            echo -e "Invalid tunnel \e[36m$TUNNEL\e[0m (key does not exist)"
+            echo 1
+        else
+            rm $TUNNEL_KEY $TUNNEL_KEY.pub
+            echo -e "Tunnel \e[36m$TUNNEL\e[0m deleted"
+        fi
+        ;;
+    *)
+        usage
+esac
