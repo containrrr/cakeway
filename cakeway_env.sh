@@ -9,3 +9,4 @@ export CW_USER="cakewalker"
 export CW_WALKERSHELL="$CW_BIN/cakewalker"
 export CW_WALKERHOME="$CW_ROOT/cakewalker"
 export CW_WALKERSSH="$CW_WALKERHOME/.ssh"
+export CW_PORT_MIN=28001
